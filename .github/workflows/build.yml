@@ -5,7 +5,8 @@ on:
     branches:
       - master
     tags:
-      - 'v*.*.*'
+      - '*.*.*'
+      - '*.*.*-*'  # For versions like 3.7.4-20250125
   pull_request:
     branches:
       - master
@@ -125,13 +126,29 @@ jobs:
           images: |
             ghcr.io/mountaintopsolutions/apt-cacher-ng
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            latest
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+            type=sha,prefix={{branch}}-
+
+          # Tag Logic Examples:
+          # 1. On tag push (e.g. v3.7.4-20250125):
+          #    - ghcr.io/mountaintopsolutions/apt-cacher-ng:3.7.4-20250125
+          #
+          # 2. On master branch push:
+          #    - ghcr.io/mountaintopsolutions/apt-cacher-ng:latest
+          #    - ghcr.io/mountaintopsolutions/apt-cacher-ng:master-sha-123456
+          #
+          # 3. On other branches/PRs:
+          #    - ghcr.io/mountaintopsolutions/apt-cacher-ng:mybranch-sha-123456
 
       - name: Set up Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: 'linux/amd64,linux/arm64,linux/arm/v7'
 
       - name: Login to Github Packages
         if: github.event_name != 'pull_request'
