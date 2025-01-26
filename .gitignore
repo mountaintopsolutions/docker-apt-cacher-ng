@@ -1,6 +1,9 @@
 # Mac/OSX
 .DS_Store
 
+# Python VENV folder for testing actions python scripts
+.venv/
+
 # VIM
 # Swap
 [._]*.s[a-v][a-z]
