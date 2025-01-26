@@ -1,4 +1,4 @@
-[![apt-cacher-ng](https://github.com/sameersbn/docker-apt-cacher-ng/actions/workflows/build.yml/badge.svg)](https://github.com/sameersbn/docker-apt-cacher-ng/actions/workflows/build.yml)
+[![apt-cacher-ng](https://github.com/mountaintopsolutions/docker-apt-cacher-ng/actions/workflows/build.yml/badge.svg)](https://github.com/mountaintopsolutions/docker-apt-cacher-ng/actions/workflows/build.yml)
 
 # Updating this repo as it seems unmaintained - 1-25-2025
 
@@ -10,6 +10,8 @@ The first of which is: https://github.com/sameersbn/docker-apt-cacher-ng/pull/64
 Second is a cherry pick of: https://github.com/sameersbn/docker-apt-cacher-ng/pull/65/files
 
 Also updated the action to use the current versions of the actions for the build process.
+
+Note: Currently only pushing packages to [GHCR.io](https://github.com/users/mountaintopsolutions/packages/container/package/apt-cacher-ng)
 
 # sameersbn/apt-cacher-ng:3.7.4-20220421
 
