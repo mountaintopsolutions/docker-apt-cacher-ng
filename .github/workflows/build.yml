@@ -127,19 +127,16 @@ jobs:
             ghcr.io/mountaintopsolutions/apt-cacher-ng
           tags: |
             type=ref,event=tag
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
-            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            type=sha,prefix=sha-
 
           # Tag Logic Examples:
           # 1. On tag push (e.g. v3.7.4-20250125):
           #    - ghcr.io/mountaintopsolutions/apt-cacher-ng:3.7.4-20250125
-          #
-          # 2. On master branch push:
           #    - ghcr.io/mountaintopsolutions/apt-cacher-ng:latest
-          #    - ghcr.io/mountaintopsolutions/apt-cacher-ng:master-sha-123456
           #
-          # 3. On other branches/PRs:
-          #    - ghcr.io/mountaintopsolutions/apt-cacher-ng:mybranch-sha-123456
+          # 2. On other branches/PRs:
+          #    - ghcr.io/mountaintopsolutions/apt-cacher-ng:sha-123456
 
       - name: Set up Docker Buildx
         id: buildx
