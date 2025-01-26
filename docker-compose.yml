@@ -1,11 +1,11 @@
-version: '3'
-
+---
 services:
   apt-cacher-ng:
     restart: always
-    image: sameersbn/apt-cacher-ng:3.7.4-20220421
+    image: ghcr.io/mountaintopsolutions/apt-cacher-ng:latest
     init: true
     ports:
     - "3142:3142"
     volumes:
     - /srv/docker/apt-cacher-ng:/var/cache/apt-cacher-ng
+    - /srv/docker/apt-cacher-ng/config:/etc/apt-cacher-ng/user-config
