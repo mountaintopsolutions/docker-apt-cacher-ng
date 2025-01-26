@@ -1,5 +1,13 @@
 [![apt-cacher-ng](https://github.com/sameersbn/docker-apt-cacher-ng/actions/workflows/build.yml/badge.svg)](https://github.com/sameersbn/docker-apt-cacher-ng/actions/workflows/build.yml)
 
+# Updating this repo as it seems unmaintained - 1-25-2025
+
+Pulling Some useful bits from pull requests to the original repo.
+
+Unfortunately no good way to maintain the original commits / PR ids for these changes.  
+
+The first of which is: https://github.com/sameersbn/docker-apt-cacher-ng/pull/64 courtesy of jack60612
+
 # sameersbn/apt-cacher-ng:3.7.4-20220421
 
 - [Introduction](#introduction)

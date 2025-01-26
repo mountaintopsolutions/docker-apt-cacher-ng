@@ -23,6 +23,12 @@ create_pid_dir
 create_cache_dir
 create_log_dir
 
+# From https://github.com/sameersbn/docker-apt-cacher-ng/pull/64/files courtesy of jack60612
+#if user config directory was mounted / exists copy files to main apt-cacher-ng directory
+if [ -d "$APT_CACHER_NG_CONFIG_DIR" ]; then;
+  cp ${APT_CACHER_NG_CONFIG_DIR}/.  /etc/apt-cacher-ng/
+fi
+
 # allow arguments to be passed to apt-cacher-ng
 if [[ ${1:0:1} = '-' ]]; then
   EXTRA_ARGS="$@"
