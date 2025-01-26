@@ -31,22 +31,15 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to ghcr.io registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Build and Push to GHCR
+      - name: Build Test Image
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
-          tags: ghcr.io/mountaintopsolutions/apt-cacher-ng:${{ github.run_id }}
+          load: true
+          tags: apt-cacher-ng:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64
+          platforms: linux/amd64  # Single platform for testing
 
   test-integration:
       name: Integration tests in Docker Compose
@@ -96,7 +89,7 @@ jobs:
         - name: Run Trivy for HIGH,CRITICAL CVEs and report (blocking)
           uses: aquasecurity/trivy-action@master
           with:
-            image-ref: ghcr.io/mountaintopsolutions/apt-cacher-ng:${{ github.run_id }}
+            image-ref: apt-cacher-ng:test
             exit-code: 0
             ignore-unfixed: true
             vuln-type: 'os,library'
