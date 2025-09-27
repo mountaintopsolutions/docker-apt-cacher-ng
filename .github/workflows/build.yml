@@ -131,7 +131,7 @@ jobs:
         - name: Test 1 - Service is accessible
           run: |
             echo "Testing if apt-cacher-ng service is accessible..."
-            curl -f http://localhost:3142/ || exit 1
+            curl -f "http://localhost:3142/acng-report.html" | grep -i "apt-cacher" || exit 1
             echo "✓ Service is accessible"
 
         - name: Test 2 - Package download through cache
