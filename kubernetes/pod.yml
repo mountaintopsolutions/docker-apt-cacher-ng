@@ -9,7 +9,7 @@ spec:
   containers:
     - name: apt-cacher-ng
       image: ghcr.io/mountaintopsolutions/apt-cacher-ng:latest
-      imagePullPolicy: IfNotPresent
+      imagePullPolicy: Always
       resources:
         limits:
           memory: "64Mi"
