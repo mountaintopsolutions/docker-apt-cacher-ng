@@ -137,7 +137,7 @@ jobs:
         - name: Test 2 - Package download through cache
           run: |
             echo "Testing package download through cache..."
-            docker compose -f docker-compose.test.yml exec test-client bash -c "
+            docker compose -f docker-compose.test.yml exec --user root test-client bash -c "
               apt-get update &&
               apt-get download curl -y
             " || exit 1
@@ -163,7 +163,7 @@ jobs:
             echo "Testing cache functionality..."
 
             # Download same package again to test caching
-            docker compose -f docker-compose.test.yml exec test-client bash -c "
+            docker compose -f docker-compose.test.yml exec --user root test-client bash -c "
               apt-get download curl -y
             "
 
@@ -184,7 +184,7 @@ jobs:
             echo "Testing entrypoint log aggregation..."
 
             # Trigger some activity to generate logs
-            docker compose -f docker-compose.test.yml exec test-client bash -c "
+            docker compose -f docker-compose.test.yml exec --user root test-client bash -c "
               apt-get update > /dev/null 2>&1
             "
 
