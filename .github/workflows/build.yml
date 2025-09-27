@@ -72,6 +72,145 @@ jobs:
         - name: Checkout git repo
           uses: actions/checkout@v5
 
+        - name: Set up Docker Buildx
+          uses: docker/setup-buildx-action@v3
+
+        - name: Build Test Image
+          uses: docker/build-push-action@v6
+          with:
+            context: .
+            load: true
+            tags: apt-cacher-ng:test
+            cache-from: type=gha
+            platforms: linux/amd64
+
+        - name: Create test docker-compose file
+          run: |
+            cat > docker-compose.test.yml << 'EOF'
+            services:
+              apt-cacher-ng:
+                image: apt-cacher-ng:test
+                init: true
+                ports:
+                  - "3142:3142"
+                volumes:
+                  - apt-cache:/var/cache/apt-cacher-ng
+                  - apt-logs:/var/log/apt-cacher-ng
+                healthcheck:
+                  test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3142/acng-report.html"]
+                  interval: 10s
+                  timeout: 5s
+                  retries: 3
+                  start_period: 30s
+
+              test-client:
+                image: ubuntu:jammy
+                depends_on:
+                  apt-cacher-ng:
+                    condition: service_healthy
+                volumes:
+                  - apt-logs:/test-logs:ro
+                command: sleep 300
+                environment:
+                  - http_proxy=http://apt-cacher-ng:3142
+                  - https_proxy=http://apt-cacher-ng:3142
+
+            volumes:
+              apt-cache:
+              apt-logs:
+            EOF
+
+        - name: Start services
+          run: docker compose -f docker-compose.test.yml up -d
+
+        - name: Wait for apt-cacher-ng to be healthy
+          run: |
+            echo "Waiting for apt-cacher-ng to be healthy..."
+            timeout 60 bash -c 'until docker compose -f docker-compose.test.yml ps apt-cacher-ng | grep -q "healthy"; do sleep 2; done'
+
+        - name: Test 1 - Service is accessible
+          run: |
+            echo "Testing if apt-cacher-ng service is accessible..."
+            curl -f http://localhost:3142/ || exit 1
+            echo "✓ Service is accessible"
+
+        - name: Test 2 - Package download through cache
+          run: |
+            echo "Testing package download through cache..."
+            docker compose -f docker-compose.test.yml exec test-client bash -c "
+              apt-get update &&
+              apt-get download curl -y
+            " || exit 1
+            echo "✓ Package download successful"
+
+        - name: Test 3 - Log files are created and tailing works
+          run: |
+            echo "Testing log file creation and tailing..."
+
+            # Check if log files are created
+            docker compose -f docker-compose.test.yml exec test-client bash -c "
+              ls -la /test-logs/ | grep -E '(apt-cacher\.(log|err|dbg))'
+            " || exit 1
+            echo "✓ Log files are created"
+
+            # Check if logs contain activity
+            sleep 5
+            docker compose -f docker-compose.test.yml logs apt-cacher-ng | grep -E "(apt-cacher\.(log|err|dbg)|==>.*/var/log)" || exit 1
+            echo "✓ Log tailing is working"
+
+        - name: Test 4 - Cache functionality verification
+          run: |
+            echo "Testing cache functionality..."
+
+            # Download same package again to test caching
+            docker compose -f docker-compose.test.yml exec test-client bash -c "
+              apt-get download curl -y
+            "
+
+            # Check cache directory has content
+            docker compose -f docker-compose.test.yml exec apt-cacher-ng bash -c "
+              find /var/cache/apt-cacher-ng -name '*.deb' | head -1
+            " || exit 1
+            echo "✓ Cache functionality verified"
+
+        - name: Test 5 - Service responds to management interface
+          run: |
+            echo "Testing management interface..."
+            curl -f "http://localhost:3142/acng-report.html" | grep -i "apt-cacher" || exit 1
+            echo "✓ Management interface is working"
+
+        - name: Test 6 - Entrypoint log aggregation
+          run: |
+            echo "Testing entrypoint log aggregation..."
+
+            # Trigger some activity to generate logs
+            docker compose -f docker-compose.test.yml exec test-client bash -c "
+              apt-get update > /dev/null 2>&1
+            "
+
+            sleep 3
+
+            # Check that container logs show aggregated output from all log files
+            logs=$(docker compose -f docker-compose.test.yml logs apt-cacher-ng)
+            echo "$logs" | grep -E "==>.*/var/log/apt-cacher-ng" || exit 1
+            echo "✓ Entrypoint log aggregation is working"
+
+        - name: Show logs on failure
+          if: failure()
+          run: |
+            echo "=== apt-cacher-ng service logs ==="
+            docker compose -f docker-compose.test.yml logs apt-cacher-ng
+            echo "=== apt-cacher-ng container inspect ==="
+            docker compose -f docker-compose.test.yml ps
+            echo "=== Cache directory contents ==="
+            docker compose -f docker-compose.test.yml exec apt-cacher-ng ls -la /var/cache/apt-cacher-ng/ || true
+            echo "=== Log directory contents ==="
+            docker compose -f docker-compose.test.yml exec apt-cacher-ng ls -la /var/log/apt-cacher-ng/ || true
+
+        - name: Cleanup
+          if: always()
+          run: docker compose -f docker-compose.test.yml down -v
+
   build-and-push-docker-image:
     name: Build and Push Docker Image
     needs: [test-integration]

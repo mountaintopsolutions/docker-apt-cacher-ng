@@ -38,10 +38,40 @@ elif [[ ${1} == apt-cacher-ng || ${1} == $(command -v apt-cacher-ng) ]]; then
   set --
 fi
 
+# Function to tail log files once they exist
+tail_logs() {
+  local log_files=(
+    "${APT_CACHER_NG_LOG_DIR}/apt-cacher.log"
+    "${APT_CACHER_NG_LOG_DIR}/apt-cacher.err"
+    "${APT_CACHER_NG_LOG_DIR}/apt-cacher.dbg"
+  )
+
+  # Wait for log files to be created, then tail them
+  while true; do
+    local existing_files=()
+    for file in "${log_files[@]}"; do
+      if [[ -f "$file" ]]; then
+        existing_files+=("$file")
+      fi
+    done
+
+    if [[ ${#existing_files[@]} -gt 0 ]]; then
+      tail -f "${existing_files[@]}"
+      break
+    fi
+
+    sleep 1
+  done
+}
+
 # default behaviour is to launch apt-cacher-ng
 if [[ -z ${1} ]]; then
-  exec start-stop-daemon --start --chuid "${APT_CACHER_NG_USER}":"${APT_CACHER_NG_USER}" \
-    --exec "$(command -v apt-cacher-ng)" -- -c /etc/apt-cacher-ng "${EXTRA_ARGS}"
+  # Start apt-cacher-ng in background
+  start-stop-daemon --start --chuid "${APT_CACHER_NG_USER}":"${APT_CACHER_NG_USER}" \
+    --exec "$(command -v apt-cacher-ng)" -- -c /etc/apt-cacher-ng "${EXTRA_ARGS}" &
+
+  # Tail the log files
+  tail_logs
 else
   exec "$@"
 fi
