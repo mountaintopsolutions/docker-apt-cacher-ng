@@ -188,12 +188,32 @@ jobs:
               apt-get update > /dev/null 2>&1
             "
 
-            sleep 3
+            sleep 5
 
-            # Check that container logs show aggregated output from all log files
+            # Get container logs
             logs=$(docker compose -f docker-compose.test.yml logs apt-cacher-ng)
-            echo "$logs" | grep -E "==>.*/var/log/apt-cacher-ng" || exit 1
-            echo "✓ Entrypoint log aggregation is working"
+
+            # Check for log aggregation headers (tail -f output format)
+            echo "Checking for log aggregation headers..."
+            if echo "$logs" | grep -E "==>.*/var/log/apt-cacher-ng" > /dev/null; then
+              echo "✓ Found log aggregation headers"
+            else
+              echo "✗ No log aggregation headers found"
+              exit 1
+            fi
+
+            # Check for actual successful cache activity (InRelease files indicate successful apt operations)
+            echo "Checking for successful cache activity..."
+            if echo "$logs" | grep -E "^apt-cacher-ng-1.*[0-9]{10}\|[IO]\|.*InRelease" > /dev/null; then
+              echo "✓ Found successful cache activity with InRelease files"
+            else
+              echo "✗ No successful cache activity found (no InRelease file entries)"
+              echo "Available logs:"
+              echo "$logs"
+              exit 1
+            fi
+
+            echo "✓ Entrypoint log aggregation is working correctly"
 
         - name: Show logs on failure
           if: failure()
