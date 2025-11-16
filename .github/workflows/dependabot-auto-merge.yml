@@ -98,14 +98,25 @@ jobs:
 
           while [[ $ATTEMPT -lt $MAX_ATTEMPTS ]]; do
             # Get workflow runs for this commit
-            WORKFLOW_RUNS=$(gh api \
+            # Use a more defensive approach to handle API failures
+            WORKFLOW_RUNS="{}"
+            if API_RESULT=$(gh api \
               -H "Accept: application/vnd.github.v3+json" \
               "repos/$REPO/actions/runs" \
               -f "head_sha=$COMMIT_SHA" \
-              --jq "[.workflow_runs[] | select(.name == \"$WORKFLOW_NAME\")] | .[0] // {}" 2>/dev/null || echo "{}")
+              --jq "[.workflow_runs[] | select(.name == \"$WORKFLOW_NAME\")] | .[0] // {}" 2>&1); then
+              # Only use the result if it's valid JSON
+              if echo "$API_RESULT" | jq -e . >/dev/null 2>&1; then
+                WORKFLOW_RUNS="$API_RESULT"
+              else
+                echo "API returned invalid JSON, using empty object"
+              fi
+            else
+              echo "API call failed, will retry..."
+            fi
 
             # Check if we found a workflow run
-            WORKFLOW_ID=$(echo "$WORKFLOW_RUNS" | jq -r '.id // empty')
+            WORKFLOW_ID=$(echo "$WORKFLOW_RUNS" | jq -r '.id // empty' 2>/dev/null || echo "")
 
             if [[ -n "$WORKFLOW_ID" && "$WORKFLOW_ID" != "null" ]]; then
               STATUS=$(echo "$WORKFLOW_RUNS" | jq -r '.status')
