@@ -141,12 +141,14 @@ jobs:
               -H "Accept: application/vnd.github.v3+json" \
               "repos/$REPO/actions/runs" \
               -f "head_sha=$COMMIT_SHA" \
-              --jq ".workflow_runs[] | select(.name == \"$WORKFLOW_NAME\") | {id: .id, status: .status, conclusion: .conclusion, name: .name}" 2>/dev/null || echo "")
+              --jq "[.workflow_runs[] | select(.name == \"$WORKFLOW_NAME\")] | .[0] // {}" 2>/dev/null || echo "{}")
 
-            if [[ -n "$WORKFLOW_RUNS" ]]; then
-              WORKFLOW_ID=$(echo "$WORKFLOW_RUNS" | head -1 | jq -r '.id')
-              STATUS=$(echo "$WORKFLOW_RUNS" | head -1 | jq -r '.status')
-              CONCLUSION=$(echo "$WORKFLOW_RUNS" | head -1 | jq -r '.conclusion')
+            # Check if we found a workflow run
+            WORKFLOW_ID=$(echo "$WORKFLOW_RUNS" | jq -r '.id // empty')
+
+            if [[ -n "$WORKFLOW_ID" && "$WORKFLOW_ID" != "null" ]]; then
+              STATUS=$(echo "$WORKFLOW_RUNS" | jq -r '.status')
+              CONCLUSION=$(echo "$WORKFLOW_RUNS" | jq -r '.conclusion')
 
               echo "Workflow Run ID: $WORKFLOW_ID"
               echo "Status: $STATUS"
