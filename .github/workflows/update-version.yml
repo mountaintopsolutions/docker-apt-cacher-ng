@@ -1,0 +1,123 @@
+name: Update Version References
+
+on:
+  pull_request:
+    paths:
+      - 'Dockerfile'
+  push:
+    branches:
+      - master
+    paths:
+      - 'Dockerfile'
+
+permissions:
+  contents: write
+
+jobs:
+  update-version:
+    name: Update Version References
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run version update script
+        id: update
+        run: |
+          echo "Running update-version.py..."
+          python update-version.py
+
+          # Extract the new version from Dockerfile
+          VERSION=$(grep -oP 'FROM ubuntu:jammy-\K\d{8}' Dockerfile)
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Extracted version: v3.7.4-${VERSION}"
+
+      - name: Check for changes
+        id: check
+        run: |
+          if git diff --quiet README.md; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No changes detected in README.md"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Changes detected in README.md"
+            echo "Git diff:"
+            git diff README.md
+          fi
+
+      - name: Validate changes on pull request
+        if: github.event_name == 'pull_request' && steps.check.outputs.changed == 'true'
+        run: |
+          echo "✓ Version update script ran successfully"
+          echo "✓ README.md would be updated with version: v3.7.4-${{ steps.update.outputs.version }}"
+          echo ""
+          echo "Changes that would be committed:"
+          git diff README.md
+
+      - name: Configure Git
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.check.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and tag changes
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.check.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.update.outputs.version }}
+        run: |
+          # Commit the README.md changes
+          git add README.md
+          git commit -m "chore: update version to v3.7.4-${VERSION}"
+
+          # Create and push the tag
+          TAG="v3.7.4-${VERSION}"
+
+          # Check if tag already exists
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists, skipping tag creation"
+          else
+            echo "Creating tag: $TAG"
+            git tag -a "$TAG" -m "Release v3.7.4-${VERSION}"
+          fi
+
+      - name: Push changes and tag
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.check.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.update.outputs.version }}
+        run: |
+          # Push the commit
+          echo "Pushing commit to master..."
+          git push origin master
+
+          # Push the tag if it was created
+          TAG="v3.7.4-${VERSION}"
+          if git tag -l | grep -q "^${TAG}$"; then
+            echo "Pushing tag: $TAG"
+            git push origin "$TAG" || echo "Tag already exists on remote or push failed"
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Version Update Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Event**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: v3.7.4-${{ steps.update.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Changes detected**: ${{ steps.check.outputs.changed }}" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/master" && "${{ steps.check.outputs.changed }}" == "true" ]]; then
+            echo "- **Action taken**: Committed README.md and created tag v3.7.4-${{ steps.update.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ github.event_name }}" == "pull_request" && "${{ steps.check.outputs.changed }}" == "true" ]]; then
+            echo "- **Action taken**: Validated changes (PR mode)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Action taken**: No action needed" >> $GITHUB_STEP_SUMMARY
+          fi

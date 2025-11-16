@@ -13,7 +13,7 @@ Also updated the action to use the current versions of the actions for the build
 
 Note: Currently only pushing packages to [GHCR.io](https://github.com/users/mountaintopsolutions/packages/container/package/apt-cacher-ng)
 
-# mountaintopsolutions/apt-cacher-ng:v3.7.4-20250819
+# mountaintopsolutions/apt-cacher-ng:v3.7.4-20251013
 
 - [Introduction](#introduction)
   - [Contributing](#contributing)
@@ -66,7 +66,7 @@ Automated builds of the image are available on [Dockerhub](https://hub.docker.co
 > **Note**: Builds are also available on [Quay.io](https://quay.io/repository/sameersbn/apt-cacher-ng)
 
 ```bash
-docker pull mountaintopsolutions/apt-cacher-ng:v3.7.4-20250819
+docker pull mountaintopsolutions/apt-cacher-ng:v3.7.4-20251013
 ```
 
 Alternatively you can build the image yourself.
@@ -83,7 +83,7 @@ Start Apt-Cacher NG using:
 docker run --name apt-cacher-ng --init -d --restart=always \
   --publish 3142:3142 \
   --volume /srv/docker/apt-cacher-ng:/var/cache/apt-cacher-ng \
-  mountaintopsolutions/apt-cacher-ng:v3.7.4-20251001
+  mountaintopsolutions/apt-cacher-ng:v3.7.4-20251013
 ```
 
 *Alternatively, you can use the sample [docker-compose.yml](docker-compose.yml) file to start the container using [Docker Compose](https://docs.docker.com/compose/)*
@@ -96,7 +96,7 @@ You can customize the launch command of Apt-Cacher NG server by specifying argum
 docker run --name apt-cacher-ng --init -it --rm \
   --publish 3142:3142 \
   --volume /srv/docker/apt-cacher-ng:/var/cache/apt-cacher-ng \
-  mountaintopsolutions/apt-cacher-ng:v3.7.4-20251001 -h
+  mountaintopsolutions/apt-cacher-ng:v3.7.4-20251013 -h
 ```
 
 ## Persistence
@@ -183,7 +183,7 @@ Using the [Command-line arguments](#command-line-arguments) feature, you can spe
 docker run --name apt-cacher-ng --init -it --rm \
   --publish 3142:3142 \
   --volume /srv/docker/apt-cacher-ng:/var/cache/apt-cacher-ng \
-  mountaintopsolutions/apt-cacher-ng:v3.7.4-20251001 -e
+  mountaintopsolutions/apt-cacher-ng:v3.7.4-20251013 -e
 ```
 
 The same can also be achieved on a running instance by visiting the url http://localhost:3142/acng-report.html in the web browser and selecting the **Start Scan and/or Expiration** option.
@@ -195,7 +195,7 @@ To upgrade to newer releases:
   1. Download the updated Docker image:
 
   ```bash
-  docker pull mountaintopsolutions/apt-cacher-ng:v3.7.4-20251001
+  docker pull mountaintopsolutions/apt-cacher-ng:v3.7.4-20251013
   ```
 
   2. Stop the currently running image:
@@ -215,7 +215,7 @@ To upgrade to newer releases:
   ```bash
   docker run --name apt-cacher-ng --init -d \
     [OPTIONS] \
-    mountaintopsolutions/apt-cacher-ng:v3.7.4-20251001
+    mountaintopsolutions/apt-cacher-ng:v3.7.4-20251013
   ```
 
 ## Shell Access
