@@ -26,14 +26,10 @@ jobs:
     permissions:
       pull-requests: write
       contents: write
-    outputs:
-      should_auto_merge: ${{ steps.check-dependabot.outputs.should_auto_merge }}
 
     steps:
       - name: Verify PR is from dependabot
         id: check-dependabot
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           PR_AUTHOR="${{ github.event.pull_request.user.login }}"
 
@@ -41,25 +37,11 @@ jobs:
           if [[ "$PR_AUTHOR" != "dependabot[bot]" ]]; then
             echo "✗ PR is from $PR_AUTHOR, not dependabot - skipping"
             echo "approved=false" >> $GITHUB_OUTPUT
-            echo "should_auto_merge=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           echo "✓ PR is from dependabot[bot]"
           echo "approved=true" >> $GITHUB_OUTPUT
-
-          # Check if this is a Docker ubuntu base image update
-          # These PRs modify the Dockerfile and trigger update-version.yml which creates
-          # a new commit. We'll approve but NOT auto-merge to avoid race conditions.
-          if echo "$PR_TITLE" | grep -qiE "bump ubuntu from.*jammy"; then
-            echo "⚠ This is a Ubuntu base image update"
-            echo "⚠ Auto-merge will be skipped to avoid race with update-version.yml"
-            echo "⚠ Please merge manually after tests pass"
-            echo "should_auto_merge=false" >> $GITHUB_OUTPUT
-          else
-            echo "✓ This PR can be auto-merged"
-            echo "should_auto_merge=true" >> $GITHUB_OUTPUT
-          fi
         shell: bash
 
       - name: Approve PR with GitHub CLI
@@ -76,27 +58,6 @@ jobs:
       - name: Add approval summary
         if: steps.check-dependabot.outputs.approved == 'true'
         run: echo "✅ PR Auto-Approved" >> $GITHUB_STEP_SUMMARY
-
-      - name: Comment on Ubuntu base image PRs
-        if: steps.check-dependabot.outputs.approved == 'true' && steps.check-dependabot.outputs.should_auto_merge == 'false'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          gh pr comment "$PR_NUMBER" --body "👋 This Ubuntu base image update has been auto-approved!
-
-          ⚠️ **Auto-merge is disabled** for this PR to avoid race conditions with the \`update-version.yml\` workflow.
-
-          **Next steps:**
-          1. Wait for all CI checks to pass ✅
-          2. Manually merge this PR
-          3. The \`update-version.yml\` workflow will automatically:
-             - Update version references in README.md
-             - Create a version tag (e.g., \`v3.7.4-YYYYMMDD\`)
-             - Trigger the release build
-
-          See [CLAUDE.md](https://github.com/mountaintopsolutions/docker-apt-cacher-ng/blob/master/CLAUDE.md) for more details."
-        shell: bash
 
   # Job 2: Wait for CI checks to pass
   wait-for-tests:
@@ -235,13 +196,12 @@ jobs:
   # Job 3: Auto-merge the PR
   auto-merge:
     name: Auto-Merge PR
-    needs: [auto-approve, wait-for-tests]
+    needs: wait-for-tests
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
       contents: write
-    # Only run if tests passed AND auto-merge is allowed (not a Ubuntu base image update)
-    if: success() && needs.auto-approve.outputs.should_auto_merge == 'true'
+    if: success()
 
     steps:
       - name: Check PR is still open

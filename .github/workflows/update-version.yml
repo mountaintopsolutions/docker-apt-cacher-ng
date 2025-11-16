@@ -24,6 +24,8 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+          # For PRs, checkout the head ref so we can commit to it
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -54,20 +56,30 @@ jobs:
             git diff README.md
           fi
 
-      - name: Validate changes on pull request
-        if: github.event_name == 'pull_request' && steps.check.outputs.changed == 'true'
-        run: |
-          echo "✓ Version update script ran successfully"
-          echo "✓ README.md would be updated with version: v3.7.4-${{ steps.update.outputs.version }}"
-          echo ""
-          echo "Changes that would be committed:"
-          git diff README.md
-
       - name: Configure Git
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.check.outputs.changed == 'true'
+        if: steps.check.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit changes to PR branch
+        if: github.event_name == 'pull_request' && steps.check.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.update.outputs.version }}
+        run: |
+          echo "Committing README.md changes to PR branch..."
+          git add README.md
+          git commit -m "chore: update version references to v3.7.4-${VERSION}
+
+          Auto-updated by update-version.yml workflow
+
+          🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+          Co-Authored-By: Claude <noreply@anthropic.com>"
+
+          # Push to the PR branch
+          git push origin HEAD
+          echo "✓ Changes committed and pushed to PR branch"
 
       - name: Commit and tag changes
         if: github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.check.outputs.changed == 'true'
@@ -117,7 +129,8 @@ jobs:
           if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/master" && "${{ steps.check.outputs.changed }}" == "true" ]]; then
             echo "- **Action taken**: Committed README.md and created tag v3.7.4-${{ steps.update.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           elif [[ "${{ github.event_name }}" == "pull_request" && "${{ steps.check.outputs.changed }}" == "true" ]]; then
-            echo "- **Action taken**: Validated changes (PR mode)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Action taken**: Committed version updates to PR branch" >> $GITHUB_STEP_SUMMARY
+            echo "- **Note**: Tag will be created when PR is merged to master" >> $GITHUB_STEP_SUMMARY
           else
             echo "- **Action taken**: No action needed" >> $GITHUB_STEP_SUMMARY
           fi
