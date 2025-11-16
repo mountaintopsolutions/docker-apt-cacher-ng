@@ -1,17 +1,21 @@
 [![apt-cacher-ng](https://github.com/mountaintopsolutions/docker-apt-cacher-ng/actions/workflows/build.yml/badge.svg)](https://github.com/mountaintopsolutions/docker-apt-cacher-ng/actions/workflows/build.yml)
 
-# Updating this repo as it seems unmaintained - 1-25-2025
+# Maintained Fork with Automation
 
-Pulling Some useful bits from pull requests to the original repo.
+This repository maintains and enhances [sameersbn's docker-apt-cacher-ng](https://github.com/sameersbn/docker-apt-cacher-ng) project, which is no longer actively maintained.
 
-Unfortunately no good way to maintain the original commits / PR ids for these changes.  
+## What's Different
 
-The first of which is: https://github.com/sameersbn/docker-apt-cacher-ng/pull/64 courtesy of jack60612
-Second is a cherry pick of: https://github.com/sameersbn/docker-apt-cacher-ng/pull/65/files
+- **Automated Updates**: Dependabot integration with automated version bumping and releases
+- **Enhanced Features**: Integrated improvements from the community including:
+  - [PR #64](https://github.com/sameersbn/docker-apt-cacher-ng/pull/64) - Log aggregation (courtesy of [@jack60612](https://github.com/jack60612))
+  - [PR #65](https://github.com/sameersbn/docker-apt-cacher-ng/pull/65) - Additional enhancements
+- **Modern CI/CD**: Updated GitHub Actions with multi-architecture builds (amd64, arm64, armv7)
+- **Active Maintenance**: Regular security updates and base image updates
 
-Also updated the action to use the current versions of the actions for the build process.
+## Distribution
 
-Note: Currently only pushing packages to [GHCR.io](https://github.com/users/mountaintopsolutions/packages/container/package/apt-cacher-ng)
+Images are published to [GitHub Container Registry (GHCR)](https://github.com/users/mountaintopsolutions/packages/container/package/apt-cacher-ng) with automated builds on every release.
 
 # mountaintopsolutions/apt-cacher-ng:v3.7.4-20251013
 
