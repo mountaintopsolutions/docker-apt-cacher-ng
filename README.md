@@ -6,16 +6,51 @@ This repository maintains and enhances [sameersbn's docker-apt-cacher-ng](https:
 
 ## What's Different
 
-- **Automated Updates**: Dependabot integration with automated version bumping and releases
+- **Fully Automated Updates**: Complete automation pipeline from dependency updates to releases
+  - Dependabot creates PRs for Ubuntu base image and GitHub Actions updates
+  - Automated testing, approval, and merging of Dependabot PRs
+  - Automatic version tagging and release publishing when tests pass
+  - Zero-touch maintenance for security updates
 - **Enhanced Features**: Integrated improvements from the community including:
   - [PR #64](https://github.com/sameersbn/docker-apt-cacher-ng/pull/64) - Log aggregation (courtesy of [@jack60612](https://github.com/jack60612))
   - [PR #65](https://github.com/sameersbn/docker-apt-cacher-ng/pull/65) - Additional enhancements
 - **Modern CI/CD**: Updated GitHub Actions with multi-architecture builds (amd64, arm64, armv7)
+  - Comprehensive integration tests (6 test scenarios)
+  - Security scanning with Trivy (HIGH/CRITICAL CVEs)
+  - Automated build caching for faster iterations
 - **Active Maintenance**: Regular security updates and base image updates
+  - Daily checks for Ubuntu base image updates
+  - Monthly GitHub Actions dependency updates
+  - Automated security patching through the CI/CD pipeline
 
 ## Distribution
 
 Images are published to [GitHub Container Registry (GHCR)](https://github.com/users/mountaintopsolutions/packages/container/package/apt-cacher-ng) with automated builds on every release.
+
+## Automation Pipeline
+
+This repository features a fully automated CI/CD pipeline that handles dependency updates, testing, and releases:
+
+### How It Works
+
+1. **Dependabot Detection**: Dependabot automatically checks for updates daily (Ubuntu base image) and monthly (GitHub Actions)
+2. **Automatic PR Creation**: When updates are available, Dependabot creates a pull request
+3. **Automated Testing**: The PR triggers comprehensive testing:
+   - Docker image build (multi-platform)
+   - Security scanning with Trivy
+   - 6 integration tests validating functionality
+4. **Auto-Approval & Merge**: If all tests pass, the PR is automatically approved and merged
+5. **Version Tagging**: For Ubuntu updates, a version tag is automatically created (format: `v3.7.4-YYYYMMDD`)
+6. **Release Publishing**: The version tag triggers multi-architecture image builds and publication to GHCR
+
+### Benefits
+
+- **Zero-Touch Maintenance**: Security updates are applied automatically without manual intervention
+- **Always Up-to-Date**: Base images stay current with the latest security patches
+- **Quality Assurance**: All updates go through the same rigorous testing before deployment
+- **Audit Trail**: Complete history of all changes via Git commits and GitHub Actions logs
+
+See [CLAUDE.md](CLAUDE.md) for detailed technical documentation of the automation workflows.
 
 # mountaintopsolutions/apt-cacher-ng:v3.7.4-20251013
 

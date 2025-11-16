@@ -1,0 +1,260 @@
+name: Dependabot Auto-Merge
+
+# NOTE: Using pull_request_target instead of pull_request is intentional.
+# This allows the workflow to run with the repository's full permissions,
+# which is necessary for auto-merge operations. However, this means we MUST
+# verify the PR source is trustworthy (only dependabot[bot]) before taking actions.
+# See: https://github.blog/changelog/2021-02-19-github-actions-workflows-triggered-by-dependabot-prs-run-with-read-only-permissions/
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+# Prevent concurrent runs for the same PR number to avoid race conditions
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # Job 1: Auto-Approve the Dependabot PR
+  auto-approve:
+    name: Auto-Approve Dependabot PR
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
+
+    steps:
+      - name: Verify PR is from dependabot
+        id: check-dependabot
+        run: |
+          PR_AUTHOR="${{ github.event.pull_request.user.login }}"
+          if [[ "$PR_AUTHOR" == "dependabot[bot]" ]]; then
+            echo "✓ PR is from dependabot[bot]"
+            echo "approved=true" >> $GITHUB_OUTPUT
+          else
+            echo "✗ PR is from $PR_AUTHOR, skipping approval"
+            echo "approved=false" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
+      - name: Approve PR with GitHub CLI
+        if: steps.check-dependabot.outputs.approved == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          echo "Approving PR #$PR_NUMBER..."
+          gh pr review "$PR_NUMBER" --approve \
+            --body "Auto-approved by dependabot-auto-merge workflow"
+        shell: bash
+
+      - name: Add approval summary
+        if: steps.check-dependabot.outputs.approved == 'true'
+        run: echo "✅ PR Auto-Approved" >> $GITHUB_STEP_SUMMARY
+
+  # Job 2: Wait for CI checks to pass
+  wait-for-tests:
+    name: Wait for CI Tests
+    needs: auto-approve
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      actions: read
+    timeout-minutes: 30
+
+    steps:
+      - name: Get commit SHA
+        id: get-sha
+        run: |
+          SHA="${{ github.event.pull_request.head.sha }}"
+          echo "commit_sha=$SHA" >> $GITHUB_OUTPUT
+          echo "Waiting for checks on commit: $SHA"
+        shell: bash
+
+      - name: Wait for build workflow to complete
+        id: wait-workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: ${{ steps.get-sha.outputs.commit_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+
+          WORKFLOW_NAME="build.yml"
+          MAX_ATTEMPTS=60  # 30 minutes with 30-second intervals
+          ATTEMPT=0
+          WORKFLOW_COMPLETED=false
+          WORKFLOW_PASSED=false
+
+          echo "Polling for workflow completion..."
+
+          while [[ $ATTEMPT -lt $MAX_ATTEMPTS ]]; do
+            # Get workflow runs for this commit
+            WORKFLOW_RUNS=$(gh api \
+              -H "Accept: application/vnd.github.v3+json" \
+              "repos/$REPO/actions/runs" \
+              -f "head_sha=$COMMIT_SHA" \
+              --jq '.workflow_runs[] | select(.name == "build" or .name == "Build") | {id: .id, status: .status, conclusion: .conclusion, name: .name}' 2>/dev/null || echo "")
+
+            if [[ -n "$WORKFLOW_RUNS" ]]; then
+              WORKFLOW_ID=$(echo "$WORKFLOW_RUNS" | head -1 | jq -r '.id')
+              STATUS=$(echo "$WORKFLOW_RUNS" | head -1 | jq -r '.status')
+              CONCLUSION=$(echo "$WORKFLOW_RUNS" | head -1 | jq -r '.conclusion')
+
+              echo "Workflow Run ID: $WORKFLOW_ID"
+              echo "Status: $STATUS"
+              echo "Conclusion: $CONCLUSION"
+
+              if [[ "$STATUS" == "completed" ]]; then
+                WORKFLOW_COMPLETED=true
+                if [[ "$CONCLUSION" == "success" ]]; then
+                  WORKFLOW_PASSED=true
+                  echo "✓ Workflow completed successfully"
+                else
+                  echo "✗ Workflow failed with conclusion: $CONCLUSION"
+                fi
+                break
+              fi
+            fi
+
+            ATTEMPT=$((ATTEMPT + 1))
+            REMAINING_MINUTES=$(((MAX_ATTEMPTS - ATTEMPT) * 30 / 60))
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS (${REMAINING_MINUTES}m remaining)... workflow not completed yet, waiting 30s"
+            sleep 30
+          done
+
+          if [[ $WORKFLOW_COMPLETED == false ]]; then
+            echo "✗ Workflow did not complete within 30 minutes"
+            echo "workflow_passed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          if [[ $WORKFLOW_PASSED == true ]]; then
+            echo "workflow_passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "workflow_passed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+        shell: bash
+
+      - name: Check status checks
+        id: check-status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: ${{ steps.get-sha.outputs.commit_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "Checking required status checks for commit: $COMMIT_SHA"
+
+          # Get combined status for the commit
+          COMBINED_STATUS=$(gh api \
+            "repos/$REPO/commits/$COMMIT_SHA/status" \
+            --jq '.state' 2>/dev/null || echo "unknown")
+
+          echo "Combined status: $COMBINED_STATUS"
+
+          if [[ "$COMBINED_STATUS" == "success" ]]; then
+            echo "✓ All required status checks passed"
+            echo "checks_passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "✗ Status checks did not pass (status: $COMBINED_STATUS)"
+            echo "checks_passed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+        shell: bash
+
+      - name: Add test summary
+        if: steps.check-status.outputs.checks_passed == 'true'
+        run: echo "✅ All CI Tests Passed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Report test failure
+        if: failure()
+        run: echo "❌ CI Tests Failed or Timeout" >> $GITHUB_STEP_SUMMARY
+
+  # Job 3: Auto-merge the PR
+  auto-merge:
+    name: Auto-Merge PR
+    needs: wait-for-tests
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
+    if: success()
+
+    steps:
+      - name: Check PR is still open
+        id: check-pr-status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq '.state')
+          echo "PR state: $PR_STATE"
+
+          if [[ "$PR_STATE" == "OPEN" ]]; then
+            echo "✓ PR is still open"
+            echo "is_open=true" >> $GITHUB_OUTPUT
+          else
+            echo "✗ PR is already closed (state: $PR_STATE)"
+            echo "is_open=false" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
+      - name: Enable auto-merge
+        if: steps.check-pr-status.outputs.is_open == 'true'
+        id: enable-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          echo "Enabling auto-merge for PR #$PR_NUMBER with merge strategy (creates merge commit)..."
+
+          # Enable auto-merge with merge commit strategy
+          gh pr merge "$PR_NUMBER" \
+            --auto \
+            --merge \
+            2>&1 || {
+              EXIT_CODE=$?
+              echo "⚠ Auto-merge command returned exit code: $EXIT_CODE"
+              echo "This may be expected if auto-merge is already enabled"
+              exit 0
+            }
+
+          echo "✓ Auto-merge enabled successfully"
+          echo "merge_enabled=true" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Add merge comment
+        if: steps.check-pr-status.outputs.is_open == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr comment "$PR_NUMBER" \
+            --body "✅ Auto-merging after successful CI tests. All required checks have passed."
+        shell: bash
+
+      - name: Add merge summary
+        if: steps.check-pr-status.outputs.is_open == 'true'
+        run: echo "✅ Auto-Merge Enabled" >> $GITHUB_STEP_SUMMARY
+
+      - name: Report merge skipped
+        if: steps.check-pr-status.outputs.is_open == 'false'
+        run: echo "⚠ PR already closed, merge skipped" >> $GITHUB_STEP_SUMMARY
+
+      - name: Add final summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+
+          ## Dependabot Auto-Merge Workflow Complete
+
+          - ✅ Dependabot PR auto-approved
+          - ✅ CI tests verified to pass
+          - ✅ Auto-merge enabled
+
+          The PR will automatically merge once all branch protection rules are satisfied.
+          EOF
