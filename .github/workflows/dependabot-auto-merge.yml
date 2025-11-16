@@ -32,13 +32,16 @@ jobs:
         id: check-dependabot
         run: |
           PR_AUTHOR="${{ github.event.pull_request.user.login }}"
-          if [[ "$PR_AUTHOR" == "dependabot[bot]" ]]; then
-            echo "✓ PR is from dependabot[bot]"
-            echo "approved=true" >> $GITHUB_OUTPUT
-          else
-            echo "✗ PR is from $PR_AUTHOR, skipping approval"
+
+          # Check if PR is from dependabot
+          if [[ "$PR_AUTHOR" != "dependabot[bot]" ]]; then
+            echo "✗ PR is from $PR_AUTHOR, not dependabot - skipping"
             echo "approved=false" >> $GITHUB_OUTPUT
+            exit 0
           fi
+
+          echo "✓ PR is from dependabot[bot]"
+          echo "approved=true" >> $GITHUB_OUTPUT
         shell: bash
 
       - name: Approve PR with GitHub CLI
@@ -84,26 +87,40 @@ jobs:
         run: |
           set -e
 
-          WORKFLOW_NAME="build.yml"
+          # The actual workflow name from build.yml line 1
+          WORKFLOW_NAME="Build and Publish"
           MAX_ATTEMPTS=60  # 30 minutes with 30-second intervals
           ATTEMPT=0
           WORKFLOW_COMPLETED=false
           WORKFLOW_PASSED=false
 
-          echo "Polling for workflow completion..."
+          echo "Polling for workflow completion (looking for: $WORKFLOW_NAME)..."
 
           while [[ $ATTEMPT -lt $MAX_ATTEMPTS ]]; do
             # Get workflow runs for this commit
-            WORKFLOW_RUNS=$(gh api \
+            # Use a more defensive approach to handle API failures
+            WORKFLOW_RUNS="{}"
+            if API_RESULT=$(gh api \
               -H "Accept: application/vnd.github.v3+json" \
               "repos/$REPO/actions/runs" \
               -f "head_sha=$COMMIT_SHA" \
-              --jq '.workflow_runs[] | select(.name == "build" or .name == "Build") | {id: .id, status: .status, conclusion: .conclusion, name: .name}' 2>/dev/null || echo "")
+              --jq "[.workflow_runs[] | select(.name == \"$WORKFLOW_NAME\")] | .[0] // {}" 2>&1); then
+              # Only use the result if it's valid JSON
+              if echo "$API_RESULT" | jq -e . >/dev/null 2>&1; then
+                WORKFLOW_RUNS="$API_RESULT"
+              else
+                echo "API returned invalid JSON, using empty object"
+              fi
+            else
+              echo "API call failed, will retry..."
+            fi
 
-            if [[ -n "$WORKFLOW_RUNS" ]]; then
-              WORKFLOW_ID=$(echo "$WORKFLOW_RUNS" | head -1 | jq -r '.id')
-              STATUS=$(echo "$WORKFLOW_RUNS" | head -1 | jq -r '.status')
-              CONCLUSION=$(echo "$WORKFLOW_RUNS" | head -1 | jq -r '.conclusion')
+            # Check if we found a workflow run
+            WORKFLOW_ID=$(echo "$WORKFLOW_RUNS" | jq -r '.id // empty' 2>/dev/null || echo "")
+
+            if [[ -n "$WORKFLOW_ID" && "$WORKFLOW_ID" != "null" ]]; then
+              STATUS=$(echo "$WORKFLOW_RUNS" | jq -r '.status')
+              CONCLUSION=$(echo "$WORKFLOW_RUNS" | jq -r '.conclusion')
 
               echo "Workflow Run ID: $WORKFLOW_ID"
               echo "Status: $STATUS"
@@ -141,27 +158,49 @@ jobs:
           fi
         shell: bash
 
-      - name: Check status checks
+      - name: Check status checks and check runs
         id: check-status
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMIT_SHA: ${{ steps.get-sha.outputs.commit_sha }}
           REPO: ${{ github.repository }}
         run: |
-          echo "Checking required status checks for commit: $COMMIT_SHA"
+          echo "Checking status checks and check runs for commit: $COMMIT_SHA"
 
-          # Get combined status for the commit
+          # Check GitHub Actions check runs (this is what Actions create)
+          CHECK_RUNS_FAILED=$(gh api \
+            "repos/$REPO/commits/$COMMIT_SHA/check-runs" \
+            --jq '[.check_runs[] | select(.conclusion == "failure" or .conclusion == "cancelled")] | length' 2>/dev/null || echo "0")
+
+          CHECK_RUNS_TOTAL=$(gh api \
+            "repos/$REPO/commits/$COMMIT_SHA/check-runs" \
+            --jq '.check_runs | length' 2>/dev/null || echo "0")
+
+          echo "Check runs: $CHECK_RUNS_TOTAL total, $CHECK_RUNS_FAILED failed/cancelled"
+
+          # Log which specific check runs failed for debugging
+          if [[ $CHECK_RUNS_FAILED -gt 0 ]]; then
+            echo ""
+            echo "Failed check runs:"
+            gh api "repos/$REPO/commits/$COMMIT_SHA/check-runs" \
+              --jq '.check_runs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | "  - \(.name): \(.conclusion)"' \
+              2>/dev/null || echo "  (Unable to fetch details)"
+            echo ""
+          fi
+
+          # Also check combined status (for any traditional commit statuses)
           COMBINED_STATUS=$(gh api \
             "repos/$REPO/commits/$COMMIT_SHA/status" \
             --jq '.state' 2>/dev/null || echo "unknown")
 
           echo "Combined status: $COMBINED_STATUS"
 
-          if [[ "$COMBINED_STATUS" == "success" ]]; then
-            echo "✓ All required status checks passed"
+          # Pass only if no check runs failed AND combined status is success or pending
+          if [[ $CHECK_RUNS_FAILED -eq 0 ]] && [[ "$COMBINED_STATUS" != "failure" ]]; then
+            echo "✓ All status checks and check runs passed"
             echo "checks_passed=true" >> $GITHUB_OUTPUT
           else
-            echo "✗ Status checks did not pass (status: $COMBINED_STATUS)"
+            echo "✗ Some checks failed (check runs failed: $CHECK_RUNS_FAILED, combined status: $COMBINED_STATUS)"
             echo "checks_passed=false" >> $GITHUB_OUTPUT
             exit 1
           fi
@@ -214,15 +253,33 @@ jobs:
           echo "Enabling auto-merge for PR #$PR_NUMBER with merge strategy (creates merge commit)..."
 
           # Enable auto-merge with merge commit strategy
-          gh pr merge "$PR_NUMBER" \
-            --auto \
-            --merge \
-            2>&1 || {
-              EXIT_CODE=$?
-              echo "⚠ Auto-merge command returned exit code: $EXIT_CODE"
-              echo "This may be expected if auto-merge is already enabled"
+          if ! OUTPUT=$(gh pr merge "$PR_NUMBER" --auto --merge 2>&1); then
+            EXIT_CODE=$?
+            echo "Auto-merge command returned exit code: $EXIT_CODE"
+
+            # Check if this is an expected error (auto-merge already enabled)
+            if echo "$OUTPUT" | grep -qiE "(auto-merge|already).*enabled"; then
+              echo "⚠ Auto-merge already enabled, continuing"
               exit 0
-            }
+            # Check if repository doesn't have auto-merge enabled
+            elif echo "$OUTPUT" | grep -qiE "auto.?merge.*not.*enabled|feature.*not.*enabled"; then
+              echo "❌ Repository doesn't have auto-merge enabled!"
+              echo "Please enable auto-merge in repository settings:"
+              echo "  Settings → General → Pull Requests → Allow auto-merge"
+              exit 1
+            # Check for merge conflicts
+            elif echo "$OUTPUT" | grep -qiE "conflict|mergeable"; then
+              echo "❌ Merge conflict detected: $OUTPUT"
+              exit 1
+            # Check for branch protection violations
+            elif echo "$OUTPUT" | grep -qiE "protection|required|review"; then
+              echo "❌ Branch protection requirements not met: $OUTPUT"
+              exit 1
+            else
+              echo "❌ Failed to enable auto-merge: $OUTPUT"
+              exit 1
+            fi
+          fi
 
           echo "✓ Auto-merge enabled successfully"
           echo "merge_enabled=true" >> $GITHUB_OUTPUT
