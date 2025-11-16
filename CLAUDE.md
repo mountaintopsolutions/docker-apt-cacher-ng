@@ -85,16 +85,26 @@ This is a maintained fork of [sameersbn/docker-apt-cacher-ng](https://github.com
 
 - **.github/workflows/dependabot-auto-merge.yml**: Automated Dependabot PR handling
   - **Auto-Approval**: Automatically approves PRs from dependabot[bot]
-  - **Test Validation**: Waits for build.yml workflow to complete successfully
+  - **Test Validation**: Waits for "Build and Publish" workflow to complete successfully
     - Polls every 30 seconds with 30-minute timeout
-    - Verifies all CI checks pass (build, security scan, integration tests)
+    - Validates both GitHub Actions check runs AND traditional commit statuses
+    - Logs failed check runs for debugging
+    - Handles empty/pending workflow states gracefully
   - **Auto-Merge**: Merges PR automatically after successful tests
     - Uses merge commit strategy (preserves Dependabot PR history)
-    - Only merges if all status checks pass
+    - Enhanced error handling distinguishes between:
+      - Expected: auto-merge already enabled (continues)
+      - Configuration: repository feature not enabled (fails with helpful message)
+      - Blocking: merge conflicts or branch protection violations (fails immediately)
   - **Security**: Uses pull_request_target with strict verification
     - Verifies PR author is dependabot[bot] before any action
     - Minimal permissions per job (least privilege principle)
+    - Documented security implications in workflow comments
   - **Concurrency Control**: Prevents race conditions on the same PR
+  - **Race Condition Prevention**: Works seamlessly with update-version.yml
+    - Version updates are committed to PR branches before merge
+    - All changes go through full CI pipeline
+    - No need to skip auto-merge for Ubuntu updates
 
 - **.github/workflows/scripts/**: Utility scripts
   - `tag-and-release.sh`: Manual tagging utility (alternative to auto-tagging)
@@ -107,14 +117,18 @@ This is a maintained fork of [sameersbn/docker-apt-cacher-ng](https://github.com
 ```
 1. Dependabot PR: ubuntu:jammy base image update (or GitHub Actions update)
    ↓
-2. dependabot-auto-merge.yml workflow triggers:
+2. For Ubuntu updates: update-version.yml triggers on PR:
+   - Detects Dockerfile change
+   - Updates README.md version references
+   - Commits back to PR branch
+   ↓
+3. dependabot-auto-merge.yml workflow triggers:
    - Auto-approves the PR
-   - Waits for build.yml tests to complete
+   - Waits for build.yml tests to complete (includes version update commit)
+   - Validates all check runs and statuses
    - Auto-merges if all tests pass
    ↓
-3. Dockerfile change detected in master branch (if ubuntu update)
-   ↓
-4. update-version.yml runs:
+4. When merged to master: update-version.yml runs again:
    - Extracts new date from Dockerfile
    - Updates all v3.7.4-YYYYMMDD refs in README.md
    - Creates commit with message "chore: update version to v3.7.4-YYYYMMDD"

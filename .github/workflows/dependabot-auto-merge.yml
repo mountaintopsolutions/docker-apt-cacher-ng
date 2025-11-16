@@ -167,6 +167,16 @@ jobs:
 
           echo "Check runs: $CHECK_RUNS_TOTAL total, $CHECK_RUNS_FAILED failed/cancelled"
 
+          # Log which specific check runs failed for debugging
+          if [[ $CHECK_RUNS_FAILED -gt 0 ]]; then
+            echo ""
+            echo "Failed check runs:"
+            gh api "repos/$REPO/commits/$COMMIT_SHA/check-runs" \
+              --jq '.check_runs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | "  - \(.name): \(.conclusion)"' \
+              2>/dev/null || echo "  (Unable to fetch details)"
+            echo ""
+          fi
+
           # Also check combined status (for any traditional commit statuses)
           COMBINED_STATUS=$(gh api \
             "repos/$REPO/commits/$COMMIT_SHA/status" \
