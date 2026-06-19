@@ -26,6 +26,12 @@ jobs:
     permissions:
       pull-requests: write
       contents: write
+    env:
+      # gh CLI resolves the repo for `gh pr <subcommand> <number>` via either
+      # a git remote, the --repo flag, or GH_REPO. This job has no checkout
+      # step (none is needed to approve), so without GH_REPO gh fails with
+      # "fatal: not a git repository". See wait-for-tests/auto-merge jobs too.
+      GH_REPO: ${{ github.repository }}
 
     steps:
       - name: Verify PR is from dependabot
@@ -223,6 +229,10 @@ jobs:
       pull-requests: write
       contents: write
     if: success()
+    env:
+      # Same as auto-approve: gh pr view/merge/comment need a repo context and
+      # there is no checkout step in this job.
+      GH_REPO: ${{ github.repository }}
 
     steps:
       - name: Check PR is still open
