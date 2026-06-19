@@ -21,13 +21,143 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Job 1: Auto-Approve the Dependabot PR
+  # Job 1: Wait for Claude Code Review and check its verdict.
+  # Auto-approve (job 2) is gated on Claude posting an APPROVED review, so the
+  # review must complete BEFORE approval. This job polls the Claude Code Review
+  # workflow to completion, then reads the latest formal PR review state.
+  wait-for-review:
+    name: Wait for Claude Review
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: read
+    outputs:
+      review_approved: ${{ steps.check-verdict.outputs.review_approved }}
+    timeout-minutes: 30
+    env:
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Get commit SHA
+        id: get-sha
+        run: |
+          SHA="${{ github.event.pull_request.head.sha }}"
+          echo "commit_sha=$SHA" >> $GITHUB_OUTPUT
+          echo "Waiting for Claude review on commit: $SHA"
+        shell: bash
+
+      - name: Wait for Claude Code Review workflow to complete
+        id: wait-review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: ${{ steps.get-sha.outputs.commit_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+
+          WORKFLOW_NAME="Claude Code Review"
+          MAX_ATTEMPTS=60   # 30 minutes at 30-second intervals
+          INTERVAL=30
+          ATTEMPT=0
+          REVIEW_DONE=false
+
+          echo "Polling for workflow completion (looking for: $WORKFLOW_NAME)..."
+
+          while [[ $ATTEMPT -lt $MAX_ATTEMPTS ]]; do
+            ATTEMPT=$((ATTEMPT + 1))
+
+            # See wait-for-tests for why --method GET + query string is required
+            # (passing -f head_sha defaults to POST and 404s).
+            ERRFILE=$(mktemp)
+            if ! RAW=$(gh api --method GET \
+                -H "Accept: application/vnd.github.v3+json" \
+                "repos/$REPO/actions/runs?head_sha=$COMMIT_SHA&per_page=100" 2>"$ERRFILE"); then
+              HTTP_STATUS=$(grep -oE 'HTTP [0-9]+' "$ERRFILE" | tail -1 || true)
+              [[ -z "$HTTP_STATUS" ]] && HTTP_STATUS="HTTP unknown"
+              echo "✗ gh api failed on attempt $ATTEMPT/$MAX_ATTEMPTS ($HTTP_STATUS)"
+              echo "    Endpoint: GET repos/$REPO/actions/runs?head_sha=$COMMIT_SHA"
+              echo "    Error output:"
+              sed 's/^/      /' "$ERRFILE"
+              rm -f "$ERRFILE"
+              sleep "$INTERVAL"
+              continue
+            fi
+            rm -f "$ERRFILE"
+
+            RUN_INFO=$(printf '%s' "$RAW" | jq -r \
+              --arg name "$WORKFLOW_NAME" \
+              '[.workflow_runs[] | select(.name == $name)] | .[0] // {}')
+            STATUS=$(printf '%s' "$RUN_INFO" | jq -r '.status // "missing"')
+            CONCLUSION=$(printf '%s' "$RUN_INFO" | jq -r '.conclusion // "none"')
+            echo "  [$WORKFLOW_NAME] status=$STATUS conclusion=$CONCLUSION"
+
+            if [[ "$STATUS" == "completed" ]]; then
+              REVIEW_DONE=true
+              if [[ "$CONCLUSION" != "success" ]]; then
+                echo "⚠ Claude Code Review workflow completed with conclusion: $CONCLUSION"
+              fi
+              break
+            fi
+
+            REMAINING_MINUTES=$(( (MAX_ATTEMPTS - ATTEMPT) * INTERVAL / 60 ))
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS (~${REMAINING_MINUTES}m remaining)... waiting ${INTERVAL}s"
+            sleep "$INTERVAL"
+          done
+
+          if [[ "$REVIEW_DONE" != true ]]; then
+            echo "✗ Claude Code Review did not complete within $(( MAX_ATTEMPTS * INTERVAL / 60 )) minutes"
+            exit 1
+          fi
+        shell: bash
+
+      - name: Check Claude review verdict
+        id: check-verdict
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -e
+
+          # claude-code-action posts a formal PR review: APPROVE (merge) or
+          # REQUEST_CHANGES. Gate auto-approve on APPROVED. If no review was
+          # posted (e.g. the workflow-validation skip on workflow-modifying
+          # PRs, or Claude errored), this fails closed — no approval, no merge.
+          # Retry briefly to allow API propagation right after the run completes.
+          REVIEW_STATE="none"
+          for i in 1 2 3 4 5; do
+            REVIEW_STATE=$(gh pr view "$PR_NUMBER" --json reviews \
+              --jq '.reviews[-1].state // "none"' 2>/dev/null || echo "none")
+            echo "Latest review state: $REVIEW_STATE (attempt $i/5)"
+            [[ "$REVIEW_STATE" == "APPROVED" || "$REVIEW_STATE" == "CHANGES_REQUESTED" ]] && break
+            sleep 5
+          done
+
+          if [[ "$REVIEW_STATE" == "APPROVED" ]]; then
+            echo "✓ Claude approved the PR (verdict: merge)"
+            echo "review_approved=true" >> $GITHUB_OUTPUT
+          else
+            echo "✗ Claude did not approve (latest review state: $REVIEW_STATE). Blocking auto-approve."
+            echo "review_approved=false" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
+      - name: Report blocked review
+        if: steps.check-verdict.outputs.review_approved != 'true'
+        run: echo "❌ Claude review did not approve — auto-approve skipped" >> $GITHUB_STEP_SUMMARY
+
+      - name: Add review summary
+        if: steps.check-verdict.outputs.review_approved == 'true'
+        run: echo "✅ Claude Review Approved" >> $GITHUB_STEP_SUMMARY
+
+  # Job 2: Auto-Approve — only after Claude's review verdict is "merge".
   auto-approve:
     name: Auto-Approve Dependabot PR
-    # Dependabot-only gate (see workflow header). This also replaces the old
-    # in-step author check, which exited 0 for non-dependabot PRs and let the
-    # downstream wait-for-tests/auto-merge jobs run anyway.
-    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    needs: wait-for-review
+    # Dependabot-only AND Claude must have posted an APPROVED review. If the
+    # review requested changes (or was skipped/errored), review_approved is
+    # false and this job is skipped → no approval → no merge (fail-closed).
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && needs.wait-for-review.outputs.review_approved == 'true'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -45,15 +175,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          echo "Approving PR #$PR_NUMBER..."
+          echo "Approving PR #$PR_NUMBER (Claude review approved)..."
           gh pr review "$PR_NUMBER" --approve \
-            --body "Auto-approved by dependabot-auto-merge workflow"
+            --body "Auto-approved by dependabot-auto-merge workflow (Claude review verdict: merge)"
         shell: bash
 
       - name: Add approval summary
-        run: echo "✅ PR Auto-Approved" >> $GITHUB_STEP_SUMMARY
+        run: echo "✅ PR Auto-Approved (after Claude review)" >> $GITHUB_STEP_SUMMARY
 
-  # Job 2: Wait for CI checks to pass
+  # Job 3: Wait for build & CI checks to pass (Claude review verdict is
+  # checked in the wait-for-review job above, which gates auto-approve).
   wait-for-tests:
     name: Wait for CI Tests
     needs: auto-approve
@@ -73,7 +204,7 @@ jobs:
           echo "Waiting for checks on commit: $SHA"
         shell: bash
 
-      - name: Wait for required workflows to complete
+      - name: Wait for build workflow to complete
         id: wait-workflow
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -82,10 +213,11 @@ jobs:
         run: |
           set -e
 
-          # Workflows that must ALL complete successfully before auto-merging:
-          # - "Build and Publish"  : build.yml — build, 6 integration tests, Trivy scan
-          # - "Claude Code Review" : claude-code-review.yml — AI review (gates merge)
-          REQUIRED_WORKFLOWS=("Build and Publish" "Claude Code Review")
+          # The Claude Code Review verdict is checked in the wait-for-review
+          # job (job 1), which gates auto-approve. Here we only wait for the
+          # build/test workflow:
+          # - "Build and Publish" : build.yml — build, 6 integration tests, Trivy scan
+          REQUIRED_WORKFLOWS=("Build and Publish")
 
           MAX_ATTEMPTS=60   # 30 minutes at 30-second intervals
           INTERVAL=30
@@ -230,7 +362,7 @@ jobs:
         if: failure()
         run: echo "❌ CI Tests Failed or Timeout" >> $GITHUB_STEP_SUMMARY
 
-  # Job 3: Auto-merge the PR
+  # Job 4: Auto-merge the PR
   auto-merge:
     name: Auto-Merge PR
     needs: wait-for-tests

@@ -78,7 +78,7 @@ This is a maintained fork of [sameersbn/docker-apt-cacher-ng](https://github.com
 - **.github/workflows/claude-code-review.yml**: AI code review on pull requests
   - Triggers: `pull_request` opened/synchronize
   - Uses `anthropics/claude-code-action@v1` with `allowed_bots: 'dependabot'` so Dependabot PRs are reviewed too (without this, the action aborts bot-initiated runs with "non-human actor")
-  - Posts review as a PR comment; is a required workflow for `dependabot-auto-merge.yml` (gates merging)
+  - Posts a FORMAL review (`gh pr review --approve` or `--request-changes`) with a `VERDICT: MERGE` / `VERDICT: REQUEST_CHANGES` line; an APPROVED review gates auto-approve in `dependabot-auto-merge.yml` (no approval → no merge)
 
 - **.github/workflows/claude.yml**: Interactive Claude assistant
   - Triggers: `@claude` mentions in issue/PR comments, and issue open/assign
@@ -94,9 +94,9 @@ This is a maintained fork of [sameersbn/docker-apt-cacher-ng](https://github.com
 
 - **.github/workflows/dependabot-auto-merge.yml**: Automated Dependabot PR handling
   - **Dependabot-only gating**: Every job has `if: github.event.pull_request.user.login == 'dependabot[bot]'`. Because the workflow uses `pull_request_target` (which fires for any PR), this job-level gate is both a scope control and a security control — non-dependabot PRs skip approval, tests, and merge entirely.
-  - **Auto-Approval**: Approves the Dependabot PR via `gh pr review --approve` (uses `GH_REPO` env var since the job has no checkout step)
-  - **Test Validation**: Waits for required workflows to complete successfully before merging
-    - Required workflows: "Build and Publish" (build.yml) AND "Claude Code Review" (claude-code-review.yml) — the AI review gates the merge
+  - **Wait for Review** (job 1, dependabot-only): Polls the "Claude Code Review" workflow to completion on the PR head SHA, then reads the latest formal PR review state. Outputs `review_approved=true` only if Claude posted an APPROVED review; anything else (REQUEST_CHANGES, no review, skipped/errored) blocks the pipeline (fail-closed).
+  - **Auto-Approval** (job 2): Runs only after `wait-for-review` AND only if `review_approved == 'true'`. Approves via `gh pr review --approve` (uses `GH_REPO` env var; no checkout step).
+  - **Test Validation** (job 3): Waits for the "Build and Publish" workflow (build.yml) to complete successfully before merging
     - Polls every 30 seconds with 30-minute timeout (single API call per attempt, latest run per workflow)
     - Uses `gh api --method GET` with `head_sha` in the query string (passing `-f` without `--method` defaults to POST and 404s)
     - On API failure, prints the real error (including HTTP status) instead of a bare "API call failed"
@@ -133,8 +133,9 @@ This is a maintained fork of [sameersbn/docker-apt-cacher-ng](https://github.com
    - Commits back to PR branch
    ↓
 3. dependabot-auto-merge.yml workflow triggers:
-   - Auto-approves the PR (dependabot-only; non-dependabot PRs skip entirely)
-   - Waits for build.yml AND claude-code-review.yml to complete successfully
+   - Waits for claude-code-review.yml to complete and checks its verdict
+   - Auto-approves ONLY if Claude posted an APPROVED review (dependabot-only; non-dependabot PRs skip entirely)
+   - Waits for build.yml to complete successfully
    - Validates all check runs and statuses
    - Auto-merges if all tests pass
    ↓
