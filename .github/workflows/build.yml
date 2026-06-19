@@ -37,7 +37,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Build Test Image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
@@ -76,7 +76,7 @@ jobs:
           uses: docker/setup-buildx-action@v4
 
         - name: Build Test Image
-          uses: docker/build-push-action@v6
+          uses: docker/build-push-action@v7
           with:
             context: .
             load: true
@@ -277,7 +277,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build image and push to container registries
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
