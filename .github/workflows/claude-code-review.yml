@@ -36,6 +36,14 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          # Allow Dependabot PRs to be reviewed. Without this, claude-code-action
+          # aborts with: "Workflow initiated by non-human actor: dependabot
+          # (type: Bot)". Note: update-version.yml commits to PR branches as
+          # github-actions[bot], but those pushes use the default GITHUB_TOKEN
+          # which does not trigger new workflow runs, so only `dependabot` is
+          # needed here. Add `github-actions` (or use `*`) if that ever changes.
+          allowed_bots: 'dependabot'
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
