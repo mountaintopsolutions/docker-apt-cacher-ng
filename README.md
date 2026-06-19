@@ -25,7 +25,7 @@ This repository maintains and enhances [sameersbn's docker-apt-cacher-ng](https:
 
 ## Distribution
 
-Images are published to [GitHub Container Registry (GHCR)](https://github.com/users/mountaintopsolutions/packages/container/package/apt-cacher-ng) with automated builds on every release.
+Images are published to [GitHub Container Registry (GHCR)](https://github.com/mountaintopsolutions/docker-apt-cacher-ng/pkgs/container/apt-cacher-ng) with automated builds on every release.
 
 ## Automation Pipeline
 
@@ -52,7 +52,7 @@ This repository features a fully automated CI/CD pipeline that handles dependenc
 
 See [CLAUDE.md](CLAUDE.md) for detailed technical documentation of the automation workflows.
 
-# mountaintopsolutions/apt-cacher-ng:v3.7.4-20260509
+# ghcr.io/mountaintopsolutions/apt-cacher-ng:v3.7.4-20260509
 
 - [Introduction](#introduction)
   - [Contributing](#contributing)
@@ -82,11 +82,11 @@ If you find this image useful here's how you can help:
 
 - Send a pull request with your awesome features and bug fixes
 - Help users resolve their [issues](../../issues?q=is%3Aopen+is%3Aissue).
-- Support the development of this image with a [donation](http://www.damagehead.com/donate/)
+- Support the development of the original upstream image with a [donation](http://www.damagehead.com/donate/)
 
 ## Issues
 
-Before reporting your issue please try updating Docker to the latest version and check if it resolves the issue. Refer to the Docker [installation guide](https://docs.docker.com/installation) for instructions.
+Before reporting your issue please try updating Docker to the latest version and check if it resolves the issue. Refer to the Docker [installation guide](https://docs.docker.com/engine/install/) for instructions.
 
 SELinux users should try disabling SELinux using the command `setenforce 0` to see if it resolves the issue.
 
@@ -94,24 +94,24 @@ If the above recommendations do not help then [report your issue](../../issues/n
 
 - Output of the `docker version` and `docker info` commands
 - The `docker run` command or `docker-compose.yml` used to start the image. Mask out the sensitive bits.
-- Please state if you are using [Boot2Docker](http://www.boot2docker.io), [VirtualBox](https://www.virtualbox.org), etc.
+- Please state if you are using Docker Desktop, WSL2, [VirtualBox](https://www.virtualbox.org), etc.
 
 # Getting started
 
 ## Installation
 
-Automated builds of the image are available on [Dockerhub](https://hub.docker.com/r/sameersbn/apt-cacher-ng) and is the recommended method of installation.
-
-> **Note**: Builds are also available on [Quay.io](https://quay.io/repository/sameersbn/apt-cacher-ng)
+Automated builds of the image are published to the [GitHub Container Registry (GHCR)](https://github.com/mountaintopsolutions/docker-apt-cacher-ng/pkgs/container/apt-cacher-ng) and is the recommended method of installation.
 
 ```bash
-docker pull mountaintopsolutions/apt-cacher-ng:v3.7.4-20260509
+docker pull ghcr.io/mountaintopsolutions/apt-cacher-ng:v3.7.4-20260509
 ```
 
 Alternatively you can build the image yourself.
 
 ```bash
-docker build -t mountaintopsolutions/apt-cacher-ng github.com/mountaintopsolutions/docker-apt-cacher-ng
+git clone https://github.com/mountaintopsolutions/docker-apt-cacher-ng.git
+cd docker-apt-cacher-ng
+docker build -t ghcr.io/mountaintopsolutions/apt-cacher-ng .
 ```
 
 ## Quickstart
@@ -122,7 +122,7 @@ Start Apt-Cacher NG using:
 docker run --name apt-cacher-ng --init -d --restart=always \
   --publish 3142:3142 \
   --volume /srv/docker/apt-cacher-ng:/var/cache/apt-cacher-ng \
-  mountaintopsolutions/apt-cacher-ng:v3.7.4-20260509
+  ghcr.io/mountaintopsolutions/apt-cacher-ng:v3.7.4-20260509
 ```
 
 *Alternatively, you can use the sample [docker-compose.yml](docker-compose.yml) file to start the container using [Docker Compose](https://docs.docker.com/compose/)*
@@ -135,7 +135,7 @@ You can customize the launch command of Apt-Cacher NG server by specifying argum
 docker run --name apt-cacher-ng --init -it --rm \
   --publish 3142:3142 \
   --volume /srv/docker/apt-cacher-ng:/var/cache/apt-cacher-ng \
-  mountaintopsolutions/apt-cacher-ng:v3.7.4-20260509 -h
+  ghcr.io/mountaintopsolutions/apt-cacher-ng:v3.7.4-20260509 -h
 ```
 
 ## Persistence
@@ -148,8 +148,10 @@ SELinux users should update the security context of the host mountpoint so that 
 
 ```bash
 mkdir -p /srv/docker/apt-cacher-ng
-chcon -Rt svirt_sandbox_file_t /srv/docker/apt-cacher-ng
+chcon -Rt container_file_t /srv/docker/apt-cacher-ng
 ```
+
+On modern Docker you can instead append `:z` to the volume mount (for example `/srv/docker/apt-cacher-ng:/var/cache/apt-cacher-ng:z`) and Docker will relabel the mount automatically.
 
 ## Docker Compose
 
@@ -157,12 +159,11 @@ To run Apt-Cacher NG with Docker Compose, create the following `docker-compose.y
 
 ```yaml
 ---
-version: '3'
-
 services:
   apt-cacher-ng:
-    image: mountaintopsolutions/apt-cacher-ng
+    image: ghcr.io/mountaintopsolutions/apt-cacher-ng:latest
     container_name: apt-cacher-ng
+    init: true
     ports:
       - "3142:3142"
     volumes:
@@ -176,7 +177,7 @@ volumes:
 The Apt-Cache NG service can then be started in the background with:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 ## Usage
@@ -188,25 +189,31 @@ Acquire::HTTP::Proxy "http://172.17.0.1:3142";
 Acquire::HTTPS::Proxy "false";
 ```
 
-If you are using a Laptop that is not always able to reach apt-proxy-ng
-in order to be able detect where to use the proxy or connect direct, use the these 2 files on the Laptop
+If you are using a Laptop that is not always able to reach apt-cacher-ng
+in order to be able to detect where to use the proxy or connect direct, use these 2 files on the Laptop
 ```
 cp examples/01proxy /etc/apt/apt.conf.d/
-cp examples/apt-proxy-detect.sh /usr/local/bin/
+cp examples/host-proxy-detect.sh /usr/local/bin/apt-proxy-detect.sh
 ```
 
-Similarly, to use Apt-Cacher NG in you Docker containers add the following line to your `Dockerfile` before any `apt-get` commands.
+Similarly, to use Apt-Cacher NG in your Docker containers add the following line to your `Dockerfile` before any `apt-get` commands.
 
 ```dockerfile
 RUN echo 'Acquire::HTTP::Proxy "http://172.17.0.1:3142";' >> /etc/apt/apt.conf.d/01proxy \
  && echo 'Acquire::HTTPS::Proxy "false";' >> /etc/apt/apt.conf.d/01proxy
 ```
 
-if you want to create your own image that has apt-cacher-ng preinstalled look at the sample config in the docker directory
+If you want to create your own image that has apt-cacher-ng preinstalled, see the Dockerfile and the examples/ directory.
 
 ## Logs
 
-To access the Apt-Cacher NG logs, located at `/var/log/apt-cacher-ng`, you can use `docker exec`. For example, if you want to tail the logs:
+The entrypoint automatically tails Apt-Cacher NG's three log files (`apt-cacher.log`, `apt-cacher.err`, and `apt-cacher.dbg`) from `/var/log/apt-cacher-ng` to the container's stdout, so you can view all logs with:
+
+```bash
+docker logs apt-cacher-ng
+```
+
+To follow a specific log file directly, use `docker exec`:
 
 ```bash
 docker exec -it apt-cacher-ng tail -f /var/log/apt-cacher-ng/apt-cacher.log
@@ -222,7 +229,7 @@ Using the [Command-line arguments](#command-line-arguments) feature, you can spe
 docker run --name apt-cacher-ng --init -it --rm \
   --publish 3142:3142 \
   --volume /srv/docker/apt-cacher-ng:/var/cache/apt-cacher-ng \
-  mountaintopsolutions/apt-cacher-ng:v3.7.4-20260509 -e
+  ghcr.io/mountaintopsolutions/apt-cacher-ng:v3.7.4-20260509 -e
 ```
 
 The same can also be achieved on a running instance by visiting the url http://localhost:3142/acng-report.html in the web browser and selecting the **Start Scan and/or Expiration** option.
@@ -234,7 +241,7 @@ To upgrade to newer releases:
   1. Download the updated Docker image:
 
   ```bash
-  docker pull mountaintopsolutions/apt-cacher-ng:v3.7.4-20260509
+  docker pull ghcr.io/mountaintopsolutions/apt-cacher-ng:v3.7.4-20260509
   ```
 
   2. Stop the currently running image:
@@ -246,7 +253,7 @@ To upgrade to newer releases:
   3. Remove the stopped container
 
   ```bash
-  docker rm -v apt-cacher-ng
+  docker rm apt-cacher-ng
   ```
 
   4. Start the updated image
@@ -254,7 +261,7 @@ To upgrade to newer releases:
   ```bash
   docker run --name apt-cacher-ng --init -d \
     [OPTIONS] \
-    mountaintopsolutions/apt-cacher-ng:v3.7.4-20260509
+    ghcr.io/mountaintopsolutions/apt-cacher-ng:v3.7.4-20260509
   ```
 
 ## Shell Access
