@@ -2,8 +2,10 @@ name: Dependabot Auto-Merge
 
 # NOTE: Using pull_request_target instead of pull_request is intentional.
 # This allows the workflow to run with the repository's full permissions,
-# which is necessary for auto-merge operations. However, this means we MUST
-# verify the PR source is trustworthy (only dependabot[bot]) before taking actions.
+# which is necessary for auto-merge operations. Because pull_request_target fires
+# for ANY PR, every job below is gated with:
+#   if: github.event.pull_request.user.login == 'dependabot[bot]'
+# so non-dependabot PRs skip the whole workflow (no approval, no merge).
 # See: https://github.blog/changelog/2021-02-19-github-actions-workflows-triggered-by-dependabot-prs-run-with-read-only-permissions/
 
 on:
@@ -22,6 +24,10 @@ jobs:
   # Job 1: Auto-Approve the Dependabot PR
   auto-approve:
     name: Auto-Approve Dependabot PR
+    # Dependabot-only gate (see workflow header). This also replaces the old
+    # in-step author check, which exited 0 for non-dependabot PRs and let the
+    # downstream wait-for-tests/auto-merge jobs run anyway.
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -34,24 +40,7 @@ jobs:
       GH_REPO: ${{ github.repository }}
 
     steps:
-      - name: Verify PR is from dependabot
-        id: check-dependabot
-        run: |
-          PR_AUTHOR="${{ github.event.pull_request.user.login }}"
-
-          # Check if PR is from dependabot
-          if [[ "$PR_AUTHOR" != "dependabot[bot]" ]]; then
-            echo "✗ PR is from $PR_AUTHOR, not dependabot - skipping"
-            echo "approved=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          echo "✓ PR is from dependabot[bot]"
-          echo "approved=true" >> $GITHUB_OUTPUT
-        shell: bash
-
       - name: Approve PR with GitHub CLI
-        if: steps.check-dependabot.outputs.approved == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -62,13 +51,13 @@ jobs:
         shell: bash
 
       - name: Add approval summary
-        if: steps.check-dependabot.outputs.approved == 'true'
         run: echo "✅ PR Auto-Approved" >> $GITHUB_STEP_SUMMARY
 
   # Job 2: Wait for CI checks to pass
   wait-for-tests:
     name: Wait for CI Tests
     needs: auto-approve
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       checks: read
@@ -84,7 +73,7 @@ jobs:
           echo "Waiting for checks on commit: $SHA"
         shell: bash
 
-      - name: Wait for build workflow to complete
+      - name: Wait for required workflows to complete
         id: wait-workflow
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -93,72 +82,85 @@ jobs:
         run: |
           set -e
 
-          # The actual workflow name from build.yml line 1
-          WORKFLOW_NAME="Build and Publish"
-          MAX_ATTEMPTS=60  # 30 minutes with 30-second intervals
-          ATTEMPT=0
-          WORKFLOW_COMPLETED=false
-          WORKFLOW_PASSED=false
+          # Workflows that must ALL complete successfully before auto-merging:
+          # - "Build and Publish"  : build.yml — build, 6 integration tests, Trivy scan
+          # - "Claude Code Review" : claude-code-review.yml — AI review (gates merge)
+          REQUIRED_WORKFLOWS=("Build and Publish" "Claude Code Review")
 
-          echo "Polling for workflow completion (looking for: $WORKFLOW_NAME)..."
+          MAX_ATTEMPTS=60   # 30 minutes at 30-second intervals
+          INTERVAL=30
+          ATTEMPT=0
+          ALL_DONE=false
+          ALL_PASSED=false
+
+          echo "Waiting for required workflows on commit $COMMIT_SHA:"
+          printf '  - %s\n' "${REQUIRED_WORKFLOWS[@]}"
 
           while [[ $ATTEMPT -lt $MAX_ATTEMPTS ]]; do
-            # Get workflow runs for this commit
-            # Use a more defensive approach to handle API failures
-            WORKFLOW_RUNS="{}"
-            if API_RESULT=$(gh api \
-              -H "Accept: application/vnd.github.v3+json" \
-              "repos/$REPO/actions/runs" \
-              -f "head_sha=$COMMIT_SHA" \
-              --jq "[.workflow_runs[] | select(.name == \"$WORKFLOW_NAME\")] | .[0] // {}" 2>&1); then
-              # Only use the result if it's valid JSON
-              if echo "$API_RESULT" | jq -e . >/dev/null 2>&1; then
-                WORKFLOW_RUNS="$API_RESULT"
-              else
-                echo "API returned invalid JSON, using empty object"
-              fi
-            else
-              echo "API call failed, will retry..."
-            fi
-
-            # Check if we found a workflow run
-            WORKFLOW_ID=$(echo "$WORKFLOW_RUNS" | jq -r '.id // empty' 2>/dev/null || echo "")
-
-            if [[ -n "$WORKFLOW_ID" && "$WORKFLOW_ID" != "null" ]]; then
-              STATUS=$(echo "$WORKFLOW_RUNS" | jq -r '.status')
-              CONCLUSION=$(echo "$WORKFLOW_RUNS" | jq -r '.conclusion')
-
-              echo "Workflow Run ID: $WORKFLOW_ID"
-              echo "Status: $STATUS"
-              echo "Conclusion: $CONCLUSION"
-
-              if [[ "$STATUS" == "completed" ]]; then
-                WORKFLOW_COMPLETED=true
-                if [[ "$CONCLUSION" == "success" ]]; then
-                  WORKFLOW_PASSED=true
-                  echo "✓ Workflow completed successfully"
-                else
-                  echo "✗ Workflow failed with conclusion: $CONCLUSION"
-                fi
-                break
-              fi
-            fi
-
             ATTEMPT=$((ATTEMPT + 1))
-            REMAINING_MINUTES=$(((MAX_ATTEMPTS - ATTEMPT) * 30 / 60))
-            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS (${REMAINING_MINUTES}m remaining)... workflow not completed yet, waiting 30s"
-            sleep 30
+
+            # Fetch all workflow runs for this commit in one call.
+            # IMPORTANT: --method GET is required. Passing -f fields without
+            # --method makes gh api default to POST, and POST /actions/runs
+            # does not exist (HTTP 404) — which is why this step used to spin
+            # on "API call failed" forever. head_sha goes in the query string
+            # to avoid -f entirely.
+            ERRFILE=$(mktemp)
+            if ! RAW=$(gh api --method GET \
+                -H "Accept: application/vnd.github.v3+json" \
+                "repos/$REPO/actions/runs?head_sha=$COMMIT_SHA&per_page=100" 2>"$ERRFILE"); then
+              # Print the real error (includes the HTTP status, e.g.
+              # "gh: Not Found (HTTP 404)") instead of a bare "API call failed".
+              echo "✗ gh api failed on attempt $ATTEMPT/$MAX_ATTEMPTS:"
+              sed 's/^/    /' "$ERRFILE"
+              rm -f "$ERRFILE"
+              sleep "$INTERVAL"
+              continue
+            fi
+            rm -f "$ERRFILE"
+
+            ALL_DONE=true
+            ALL_PASSED=true
+            for WF in "${REQUIRED_WORKFLOWS[@]}"; do
+              # Latest run for this workflow name (runs are returned newest-first).
+              RUN_INFO=$(printf '%s' "$RAW" | jq -r \
+                --arg name "$WF" \
+                '[.workflow_runs[] | select(.name == $name)] | .[0] // {}')
+
+              STATUS=$(printf '%s' "$RUN_INFO" | jq -r '.status // "missing"')
+              CONCLUSION=$(printf '%s' "$RUN_INFO" | jq -r '.conclusion // "none"')
+
+              echo "  [$WF] status=$STATUS conclusion=$CONCLUSION"
+
+              if [[ "$STATUS" == "missing" ]]; then
+                ALL_DONE=false      # workflow hasn't started yet
+              elif [[ "$STATUS" != "completed" ]]; then
+                ALL_DONE=false      # still running
+              elif [[ "$CONCLUSION" != "success" ]]; then
+                ALL_PASSED=false    # completed but failed
+              fi
+            done
+
+            if [[ "$ALL_DONE" == true ]]; then
+              break
+            fi
+
+            REMAINING_MINUTES=$(( (MAX_ATTEMPTS - ATTEMPT) * INTERVAL / 60 ))
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS (~${REMAINING_MINUTES}m remaining)... waiting ${INTERVAL}s"
+            sleep "$INTERVAL"
           done
 
-          if [[ $WORKFLOW_COMPLETED == false ]]; then
-            echo "✗ Workflow did not complete within 30 minutes"
+          if [[ "$ALL_DONE" != true ]]; then
+            echo "✗ Required workflows did not complete within $(( MAX_ATTEMPTS * INTERVAL / 60 )) minutes"
             echo "workflow_passed=false" >> $GITHUB_OUTPUT
             exit 1
           fi
 
-          if [[ $WORKFLOW_PASSED == true ]]; then
+          if [[ "$ALL_PASSED" == true ]]; then
+            echo "✓ All required workflows completed successfully"
             echo "workflow_passed=true" >> $GITHUB_OUTPUT
           else
+            echo "✗ One or more required workflows completed with a non-success conclusion"
             echo "workflow_passed=false" >> $GITHUB_OUTPUT
             exit 1
           fi
@@ -228,7 +230,9 @@ jobs:
     permissions:
       pull-requests: write
       contents: write
-    if: success()
+    # Dependabot-only (see auto-approve). success() preserves the default
+    # "only run if wait-for-tests succeeded" behavior.
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && success()
     env:
       # Same as auto-approve: gh pr view/merge/comment need a repo context and
       # there is no checkout step in this job.
