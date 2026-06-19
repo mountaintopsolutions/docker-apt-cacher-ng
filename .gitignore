@@ -21,3 +21,7 @@ Sessionx.vim
 
 # jet brains
 .idea
+
+# Python
+__pycache__/
+*.py[cod]
