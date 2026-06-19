@@ -74,6 +74,15 @@ This is a maintained fork of [sameersbn/docker-apt-cacher-ng](https://github.com
     4. If changed: commits, creates annotated tag, pushes both
     5. Tag format: `v3.7.4-YYYYMMDD` (triggers `build.yml` publish job)
   - Flow on pull requests: validates that script runs without errors
+
+- **.github/workflows/claude-code-review.yml**: AI code review on pull requests
+  - Triggers: `pull_request` opened/synchronize
+  - Uses `anthropics/claude-code-action@v1` with `allowed_bots: 'dependabot'` so Dependabot PRs are reviewed too (without this, the action aborts bot-initiated runs with "non-human actor")
+  - Posts review as a PR comment; is a required workflow for `dependabot-auto-merge.yml` (gates merging)
+
+- **.github/workflows/claude.yml**: Interactive Claude assistant
+  - Triggers: `@claude` mentions in issue/PR comments, and issue open/assign
+  - Uses `anthropics/claude-code-action@v1` with the repo's `CLAUDE.md` for conventions
   - Uses `github-actions[bot]` for automated commits/tags
 
 ### Dependency Management
@@ -84,20 +93,21 @@ This is a maintained fork of [sameersbn/docker-apt-cacher-ng](https://github.com
   - Creates PRs that are automatically tested and merged
 
 - **.github/workflows/dependabot-auto-merge.yml**: Automated Dependabot PR handling
-  - **Auto-Approval**: Automatically approves PRs from dependabot[bot]
-  - **Test Validation**: Waits for "Build and Publish" workflow to complete successfully
-    - Polls every 30 seconds with 30-minute timeout
-    - Validates both GitHub Actions check runs AND traditional commit statuses
-    - Logs failed check runs for debugging
-    - Handles empty/pending workflow states gracefully
-  - **Auto-Merge**: Merges PR automatically after successful tests
+  - **Dependabot-only gating**: Every job has `if: github.event.pull_request.user.login == 'dependabot[bot]'`. Because the workflow uses `pull_request_target` (which fires for any PR), this job-level gate is both a scope control and a security control — non-dependabot PRs skip approval, tests, and merge entirely.
+  - **Auto-Approval**: Approves the Dependabot PR via `gh pr review --approve` (uses `GH_REPO` env var since the job has no checkout step)
+  - **Test Validation**: Waits for required workflows to complete successfully before merging
+    - Required workflows: "Build and Publish" (build.yml) AND "Claude Code Review" (claude-code-review.yml) — the AI review gates the merge
+    - Polls every 30 seconds with 30-minute timeout (single API call per attempt, latest run per workflow)
+    - Uses `gh api --method GET` with `head_sha` in the query string (passing `-f` without `--method` defaults to POST and 404s)
+    - On API failure, prints the real error (including HTTP status) instead of a bare "API call failed"
+    - Also validates GitHub Actions check runs and traditional commit statuses
+  - **Auto-Merge**: Merges PR automatically after successful tests (uses `GH_REPO` env var)
     - Uses merge commit strategy (preserves Dependabot PR history)
     - Enhanced error handling distinguishes between:
       - Expected: auto-merge already enabled (continues)
       - Configuration: repository feature not enabled (fails with helpful message)
       - Blocking: merge conflicts or branch protection violations (fails immediately)
-  - **Security**: Uses pull_request_target with strict verification
-    - Verifies PR author is dependabot[bot] before any action
+  - **Security**: Uses pull_request_target with job-level dependabot[bot] verification
     - Minimal permissions per job (least privilege principle)
     - Documented security implications in workflow comments
   - **Concurrency Control**: Prevents race conditions on the same PR
@@ -123,8 +133,8 @@ This is a maintained fork of [sameersbn/docker-apt-cacher-ng](https://github.com
    - Commits back to PR branch
    ↓
 3. dependabot-auto-merge.yml workflow triggers:
-   - Auto-approves the PR
-   - Waits for build.yml tests to complete (includes version update commit)
+   - Auto-approves the PR (dependabot-only; non-dependabot PRs skip entirely)
+   - Waits for build.yml AND claude-code-review.yml to complete successfully
    - Validates all check runs and statuses
    - Auto-merges if all tests pass
    ↓
