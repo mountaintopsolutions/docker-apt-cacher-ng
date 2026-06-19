@@ -46,14 +46,14 @@ jobs:
       - name: Check for changes
         id: check
         run: |
-          if git diff --quiet README.md; then
+          if git diff --quiet README.md VERSION; then
             echo "changed=false" >> $GITHUB_OUTPUT
-            echo "No changes detected in README.md"
+            echo "No changes detected in README.md or VERSION"
           else
             echo "changed=true" >> $GITHUB_OUTPUT
-            echo "Changes detected in README.md"
+            echo "Changes detected in README.md and/or VERSION"
             echo "Git diff:"
-            git diff README.md
+            git diff README.md VERSION
           fi
 
       - name: Configure Git
@@ -67,8 +67,8 @@ jobs:
         env:
           VERSION: ${{ steps.update.outputs.version }}
         run: |
-          echo "Committing README.md changes to PR branch..."
-          git add README.md
+          echo "Committing README.md and VERSION changes to PR branch..."
+          git add README.md VERSION
           git commit -m "chore: update version references to v3.7.4-${VERSION}
 
           Auto-updated by update-version.yml workflow
@@ -86,8 +86,8 @@ jobs:
         env:
           VERSION: ${{ steps.update.outputs.version }}
         run: |
-          # Commit the README.md changes
-          git add README.md
+          # Commit the README.md and VERSION changes
+          git add README.md VERSION
           git commit -m "chore: update version to v3.7.4-${VERSION}"
 
           # Create and push the tag
@@ -127,7 +127,7 @@ jobs:
           echo "- **Changes detected**: ${{ steps.check.outputs.changed }}" >> $GITHUB_STEP_SUMMARY
 
           if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/master" && "${{ steps.check.outputs.changed }}" == "true" ]]; then
-            echo "- **Action taken**: Committed README.md and created tag v3.7.4-${{ steps.update.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Action taken**: Committed README.md and VERSION, and created tag v3.7.4-${{ steps.update.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           elif [[ "${{ github.event_name }}" == "pull_request" && "${{ steps.check.outputs.changed }}" == "true" ]]; then
             echo "- **Action taken**: Committed version updates to PR branch" >> $GITHUB_STEP_SUMMARY
             echo "- **Note**: Tag will be created when PR is merged to master" >> $GITHUB_STEP_SUMMARY
