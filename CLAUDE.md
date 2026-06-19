@@ -34,9 +34,12 @@ This is a maintained fork of [sameersbn/docker-apt-cacher-ng](https://github.com
 
 ### Python Automation
 
-- **update-version.py**: Synchronizes version references between Dockerfile and README.md
+- **update-version.py**: Synchronizes version references between the Dockerfile, README.md, and VERSION
+  - Extracts apt-cacher-ng version from `ARG APT_CACHER_NG_VERSION=<version>` in Dockerfile
   - Extracts YYYYMMDD date from `FROM ubuntu:jammy-YYYYMMDD` pattern in Dockerfile
-  - Updates all version references in README.md matching pattern `v3.7.4-YYYYMMDD`
+  - Derives full version tag `v<version>-<YYYYMMDD>` (e.g. `v3.7.4-20260509`)
+  - Updates all matching version references in README.md
+  - Writes the full version tag to the VERSION file
   - Uses pathlib for file operations and regex for pattern matching
   - Type hints throughout with `from __future__ import annotations`
   - Exit code 0 on success, 1 on error
@@ -140,8 +143,8 @@ This is a maintained fork of [sameersbn/docker-apt-cacher-ng](https://github.com
    - Auto-merges if all tests pass
    ↓
 4. When merged to master: update-version.yml runs again:
-   - Extracts new date from Dockerfile
-   - Updates all v3.7.4-YYYYMMDD refs in README.md
+   - Extracts version and new date from Dockerfile
+   - Updates all v3.7.4-YYYYMMDD refs in README.md and the VERSION file
    - Creates commit with message "chore: update version to v3.7.4-YYYYMMDD"
    - Creates annotated tag v3.7.4-YYYYMMDD
    ↓
