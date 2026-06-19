@@ -68,6 +68,11 @@ jobs:
       needs: [build-test-image]
       runs-on: ubuntu-latest
 
+      # Least-privilege token for integration tests: only needs to read the
+      # repository contents (checkout). No packages/SARIF writes here.
+      permissions:
+        contents: read
+
       steps:
         - name: Checkout git repo
           uses: actions/checkout@v6
@@ -235,6 +240,12 @@ jobs:
     name: Build and Push Docker Image
     needs: [test-integration]
     runs-on: ubuntu-latest
+
+    # Least-privilege token for publishing: read the repo (checkout) and write
+    # container packages to ghcr.io. Only the GITHUB_TOKEN is used for login.
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout code
