@@ -259,7 +259,7 @@ To upgrade to newer releases:
 
 ## Shell Access
 
-For debugging and maintenance purposes you may want access the containers shell. If you are using Docker version `1.3.0` or higher you can access a running containers shell by starting `bash` using `docker exec`:
+For debugging and maintenance purposes you may want to access the container's shell. You can access a running container's shell by starting `bash` using `docker exec`:
 
 ```bash
 docker exec -it apt-cacher-ng bash
