@@ -109,10 +109,18 @@ jobs:
             if ! RAW=$(gh api --method GET \
                 -H "Accept: application/vnd.github.v3+json" \
                 "repos/$REPO/actions/runs?head_sha=$COMMIT_SHA&per_page=100" 2>"$ERRFILE"); then
-              # Print the real error (includes the HTTP status, e.g.
-              # "gh: Not Found (HTTP 404)") instead of a bare "API call failed".
-              echo "✗ gh api failed on attempt $ATTEMPT/$MAX_ATTEMPTS:"
-              sed 's/^/    /' "$ERRFILE"
+              # Surface the real failure — including the HTTP status code —
+              # instead of a bare "API call failed". gh prints errors to stderr
+              # in the form 'gh: Not Found (HTTP 404)'; extract that code so it
+              # is visible at a glance in the workflow log.
+              HTTP_STATUS=$(grep -oE 'HTTP [0-9]+' "$ERRFILE" | tail -1 || true)
+              if [[ -z "$HTTP_STATUS" ]]; then
+                HTTP_STATUS="HTTP unknown"
+              fi
+              echo "✗ gh api failed on attempt $ATTEMPT/$MAX_ATTEMPTS ($HTTP_STATUS)"
+              echo "    Endpoint: GET repos/$REPO/actions/runs?head_sha=$COMMIT_SHA"
+              echo "    Error output:"
+              sed 's/^/      /' "$ERRFILE"
               rm -f "$ERRFILE"
               sleep "$INTERVAL"
               continue
