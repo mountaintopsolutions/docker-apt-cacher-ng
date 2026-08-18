@@ -1,4 +1,4 @@
-FROM ubuntu:jammy-20260627
+FROM ubuntu:jammy-20260810
 
 ARG APT_CACHER_NG_VERSION=3.7.4
 
